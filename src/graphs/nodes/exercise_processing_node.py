@@ -1,13 +1,13 @@
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from jinja2 import Template
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 from coze_coding_dev_sdk import LLMClient
-from storage.database.supabase_client import get_supabase_client
+from tools.feishu_bitable_tool import save_exercise_record, get_monthly_records
 from graphs.state import ExerciseProcessingInput, ExerciseProcessingOutput
 
 
@@ -18,8 +18,8 @@ def exercise_processing_node(
 ) -> ExerciseProcessingOutput:
     """
     title: 运动记录处理
-    desc: 解析运动内容、计算热量、生成鼓励语，并保存记录到数据库
-    integrations: 大语言模型, Supabase
+    desc: 解析运动内容、计算热量、生成鼓励语，并保存到飞书多维表格
+    integrations: 大语言模型, 飞书多维表格
     """
     ctx = runtime.context
 
@@ -100,28 +100,27 @@ def exercise_processing_node(
             description = state.user_message
             encouragement_message = "坚持运动，你真棒！"
 
-    # 计算本月总时长
-    month_start = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    # 从飞书表格获取本月记录，计算总时长
     try:
-        supabase_client = get_supabase_client()
-        response = supabase_client.table('exercise_records').select('*').gte('created_at', month_start.isoformat()).execute()
-        month_records = response.data if response.data else []
+        monthly_records = get_monthly_records()
 
-        # 计算总时长 - 确保每个record都是字典类型
+        # 计算总时长
         month_total_duration = int(duration)
-        if isinstance(month_records, list):
-            for record in month_records:
+        if isinstance(monthly_records, list):
+            for record in monthly_records:
                 if isinstance(record, dict):
-                    record_duration = record.get('duration', 0)
+                    record_fields = record.get("fields", {})
+                    record_duration = record_fields.get("运动时长(分钟)", 0)
                     if isinstance(record_duration, (int, float)):
                         month_total_duration += int(record_duration)
 
         # 计算总热量（假设瘦牛肉热量约250千卡/100g）
         total_calories = float(calories_burned)
-        if isinstance(month_records, list):
-            for record in month_records:
+        if isinstance(monthly_records, list):
+            for record in monthly_records:
                 if isinstance(record, dict):
-                    record_calories = record.get('calories_burned', 0.0)
+                    record_fields = record.get("fields", {})
+                    record_calories = record_fields.get("燃烧热量(千卡)", 0.0)
                     if isinstance(record_calories, (int, float)):
                         total_calories += float(record_calories)
 
@@ -133,22 +132,20 @@ def exercise_processing_node(
         meat_equivalent_grams = (total_calories / 250) * 100 if total_calories > 0 else 0
         month_calories_equivalent = f"{meat_equivalent_grams:.0f}克瘦牛肉"
 
-    # 保存运动记录到数据库
+    # 保存运动记录到飞书表格
     try:
-        supabase_client = get_supabase_client()
-        record_data = {
-            'user_message': state.user_message,
-            'exercise_type': exercise_type,
-            'duration': duration,
-            'description': description,
-            'calories_burned': calories_burned,
-            'month_total_duration': month_total_duration,
-            'month_calories_equivalent': month_calories_equivalent,
-            'encouragement_message': encouragement_message
-        }
-        supabase_client.table('exercise_records').insert(record_data).execute()
+        save_exercise_record(
+            user_message=state.user_message,
+            exercise_type=exercise_type,
+            duration=duration,
+            description=description,
+            calories_burned=calories_burned,
+            month_total_duration=month_total_duration,
+            month_calories_equivalent=month_calories_equivalent,
+            encouragement_message=encouragement_message
+        )
     except Exception as e:
-        pass
+        print(f"保存记录失败: {e}")
 
     # 生成响应消息
     response_message = f"""运动记录已保存！
@@ -164,6 +161,7 @@ def exercise_processing_node(
     return ExerciseProcessingOutput(
         exercise_type=exercise_type,
         duration=duration,
+        description=description,
         calories_burned=calories_burned,
         month_total_duration=month_total_duration,
         month_calories_equivalent=month_calories_equivalent,

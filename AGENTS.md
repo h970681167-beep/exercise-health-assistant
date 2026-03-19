@@ -1,77 +1,106 @@
 ## 项目概述
-- **名称**: 智能提醒与运动健康助手
-- **功能**: 对话式AI系统，支持定时提醒设置和运动记录分析，通过飞书推送提醒，自动计算运动热量并生成鼓励语
+- **名称**: 运动健康助手（云端部署版）
+- **功能**: 智能运动记录助手，基于LangGraph工作流，使用飞书多维表格存储数据，部署到Vercel云端，手机随时可用
 
 ### 节点清单
 | 节点名 | 文件位置 | 类型 | 功能描述 | 分支逻辑 | 配置文件 |
 |-------|---------|------|---------|---------|---------|
-| intent_recognition | `nodes/intent_recognition_node.py` | agent | 意图识别，判断用户是设置提醒还是记录运动 | reminder→reminder_processing<br>exercise→exercise_processing | `config/intent_recognition_cfg.json` |
-| reminder_processing | `nodes/reminder_processing_node.py` | task | 将提醒任务保存到数据库 | - | - |
-| exercise_processing | `nodes/exercise_processing_node.py` | agent | 解析运动内容、计算热量、生成鼓励语 | - | `config/exercise_processing_cfg.json` |
-| feishu_send | `nodes/feishu_send_node.py` | task | 发送飞书消息 | - | - |
-| route_based_on_intent | `graph.py` | condition | 根据意图路由到不同处理节点 | "处理提醒"→reminder_processing<br>"处理运动"→exercise_processing | - |
+| exercise_processing | `nodes/exercise_processing_node.py` | agent | 解析运动内容、计算热量、生成鼓励语、保存到飞书表格 | - | `config/exercise_processing_cfg.json` |
 
-**类型说明**: task(task节点) / agent(大模型) / condition(条件分支)
+**类型说明**: agent(大模型)
 
 ## 子图清单
 无子图
 
 ## 技能使用
-- 节点 `intent_recognition` 使用 大语言模型
-- 节点 `exercise_processing` 使用 大语言模型 + Supabase
-- 节点 `reminder_processing` 使用 Supabase
-- 节点 `feishu_send` 使用 飞书消息
+- 节点 `exercise_processing` 使用 大语言模型 + 飞书多维表格
 
-## 数据库表结构
-### reminders（提醒任务表）
-- id: 主键
-- user_message: 用户消息内容
-- remind_time: 提醒时间
-- sent: 是否已发送
-- created_at: 创建时间
+## 数据存储
 
-### exercise_records（运动记录表）
-- id: 主键
-- user_message: 用户消息内容
-- exercise_type: 运动类型
-- duration: 运动时长（分钟）
-- description: 用户描述/体验
-- calories_burned: 燃烧热量（千卡）
-- month_total_duration: 本月总时长（分钟）
-- month_calories_equivalent: 本月总热量对应肉类
-- encouragement_message: 鼓励语
-- created_at: 创建时间
+### 飞书多维表格（exercise_records表）
+
+需要在飞书中创建多维表格，添加以下字段：
+
+| 字段名 | 字段类型 | 说明 |
+|--------|---------|------|
+| 用户消息 | 文本 | 用户原始输入 |
+| 运动类型 | 文本 | 跑步/游泳/健身等 |
+| 运动时长(分钟) | 数字 | 运动时长 |
+| 燃烧热量(千卡) | 数字 | 计算的热量 |
+| 体验描述 | 文本 | 用户的感受 |
+| 本月累计时长(分钟) | 数字 | 本月总时长 |
+| 热量等价肉类 | 文本 | 对应多少克肉 |
+| 鼓励语 | 文本 | AI生成的鼓励 |
+| 记录时间 | 日期时间 | 创建时间 |
 
 ## 使用说明
-### 提醒功能
-发送消息示例：
-- "明天早上9点提醒我开会"
-- "提醒我下午3点喝水"
-- "下周三下午5点提醒我取快递"
 
-系统会：
-1. 识别提醒意图
-2. 解析提醒时间
-3. 保存到数据库
-4. 定时通过飞书推送提醒
+### 部署到 Vercel
+
+1. **创建飞书多维表格**
+   - 在飞书中创建新表格
+   - 添加上述字段
+
+2. **获取配置信息**
+   - 复制 URL 中的 `app_token`
+   - 在"高级"中获取 `table_id`
+
+3. **部署到 Vercel**
+   ```bash
+   # 使用 Vercel CLI
+   vercel login
+   vercel
+
+   # 配置环境变量
+   # FEISHU_APP_TOKEN=your_app_token
+   # FEISHU_EXERCISE_TABLE_ID=your_table_id
+   ```
+
+4. **使用 API**
+   ```bash
+   curl -X POST https://your-project.vercel.app/api/run \
+     -H "Content-Type: application/json" \
+     -d '{"user_message": "今天跑了5公里，感觉还不错"}'
+   ```
 
 ### 运动记录功能
+
 发送消息示例：
 - "今天跑了5公里，感觉还不错"
 - "游泳了40分钟，感觉轻松"
 - "健身1小时，有点累"
 
 系统会：
-1. 识别运动意图
-2. 解析运动类型、时长、体验
-3. 计算燃烧热量
-4. 统计本月累计运动
-5. 生成鼓励语
-6. 保存到数据库
+1. 解析运动类型、时长、体验
+2. 计算燃烧热量
+3. 统计本月累计运动
+4. 生成鼓励语
+5. 保存到飞书多维表格
 
 ## 工作流程
+
 ```
-用户消息 → 意图识别节点 → 条件分支
-                            ├─ 提醒 → 定时提醒处理节点 → 结束
-                            └─ 运动 → 运动记录处理节点 → 结束
+用户消息
+    ↓
+运动处理节点（exercise_processing）
+    ├─ 大模型解析运动内容
+    ├─ 计算燃烧热量
+    ├─ 统计本月数据
+    ├─ 生成鼓励语
+    └─ 保存到飞书表格
+    ↓
+返回结果
 ```
+
+## 环境变量配置
+
+| 变量名 | 必填 | 说明 |
+|--------|------|------|
+| `FEISHU_APP_TOKEN` | ✅ | 飞书多维表格的 app_token |
+| `FEISHU_EXERCISE_TABLE_ID` | ✅ | 飞书多维表格的 table_id |
+
+## 部署成本
+
+- **Vercel**: 个人版完全免费
+- **飞书多维表格**: 个人版免费
+- **总计**: $0/月
