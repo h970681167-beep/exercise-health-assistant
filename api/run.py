@@ -3,6 +3,7 @@ Vercel Serverless Function for /api/run endpoint
 """
 import sys
 import os
+import json
 from pathlib import Path
 
 # 添加 src 目录到 Python 路径
@@ -10,39 +11,50 @@ project_root = Path(__file__).parent.parent
 src_path = project_root / "src"
 sys.path.insert(0, str(src_path))
 
-import json
-from fastapi import Request
-from starlette.responses import JSONResponse
-
-# 导入 main.py 中的 app
-from main import app, service
-from coze_coding_utils.runtime_ctx.context import new_context, Context
-
-async def handler(request):
+def handler(request):
     """
     Vercel Serverless Function handler
+    
+    Args:
+        request: Vercel request object with body, method, headers
+    
+    Returns:
+        Dict with statusCode, headers, body
     """
     # 解析请求体
     try:
-        body = await request.json()
+        if isinstance(request.get('body'), str):
+            body = json.loads(request.get('body', '{}'))
+        else:
+            body = request.get('body', {})
     except Exception as e:
-        return JSONResponse(
-            status_code=400,
-            content={"error": f"Invalid JSON: {str(e)}"}
-        )
+        return {
+            "statusCode": 400,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"error": f"Invalid JSON: {str(e)}"})
+        }
 
-    # 创建上下文
-    ctx = new_context(method="run")
-    
     try:
-        # 调用 GraphService
-        result = await service.run(body, ctx)
+        # 导入 service（延迟导入）
+        from main import service
+        from coze_coding_utils.runtime_ctx.context import new_context
+        
+        # 创建上下文
+        ctx = new_context(method="run")
+        
+        # 调用 GraphService（同步调用）
+        import asyncio
+        result = asyncio.run(service.run(body, ctx))
         
         # 添加 run_id 到响应
         if isinstance(result, dict):
             result["run_id"] = ctx.run_id
         
-        return JSONResponse(content=result)
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(result, ensure_ascii=False)
+        }
     
     except Exception as e:
         import traceback
@@ -50,14 +62,8 @@ async def handler(request):
             "error": str(e),
             "traceback": traceback.format_exc()
         }
-        return JSONResponse(
-            status_code=500,
-            content=error_detail
-        )
-
-# Vercel 会自动调用这个函数
-async def main_handler(request):
-    return await handler(request)
-
-# 兼容 Vercel 的导出方式
-handler_v2 = main_handler
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps(error_detail, ensure_ascii=False)
+        }

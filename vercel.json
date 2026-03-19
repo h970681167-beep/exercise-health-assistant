@@ -3,5 +3,5 @@
   "outputDirectory": "",
   "devCommand": "",
   "installCommand": "pip install -r requirements.txt",
-  "framework": null
+  "framework": "python"
 }
