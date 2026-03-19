@@ -2,12 +2,7 @@
   "buildCommand": "",
   "outputDirectory": "",
   "devCommand": "",
-  "installCommand": "",
+  "installCommand": "pip install -r requirements.txt",
   "framework": null,
-  "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
-  ]
+  "runtime": "python3.9"
 }
